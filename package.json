@@ -1,0 +1,59 @@
+{
+  "name": "edu-center-manager",
+  "version": "1.0.0",
+  "description": "نرم‌افزار مستقل آفلاین مدیریت مراکز آموزشی",
+  "main": "main.js",
+  "author": "Education Center Manager",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/store.test.js && node test/finance.test.js && node test/assess.test.js && node test/office.test.js && node test/themes.test.js && node test/service.test.js && node test/e2e.test.js",
+    "test:unit": "node test/store.test.js && node test/finance.test.js && node test/assess.test.js && node test/office.test.js && node test/themes.test.js && node test/service.test.js",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "26.0.12",
+    "playwright": "^1.48.0"
+  },
+  "build": {
+    "appId": "com.educenter.manager",
+    "productName": "مدیریت مراکز آموزشی",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "build/icon.png"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "EduCenterManager-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "مدیریت مراکز آموزشی",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "EduCenterManager-Setup-${version}.exe"
+    },
+    "publish": null
+  },
+  "productName": "مدیریت مراکز آموزشی"
+}
