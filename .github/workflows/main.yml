@@ -1,0 +1,82 @@
+name: Build Windows Installer
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - name: Install Chromium, PDF tools, LibreOffice and Python libs (Word/Excel validation)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils python3-pil python3-docx python3-openpyxl libreoffice-writer libreoffice-calc fonts-dejavu
+          npx playwright install --with-deps chromium
+      - name: Unit + security + restore tests
+        run: npm run test:unit
+      - name: E2E (real browser, real PDFs)
+        run: E2E_OUT=$PWD/e2e-out node test/e2e.test.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: e2e-report-and-pdfs, path: e2e-out/, if-no-files-found: warn }
+  windows-build:
+    needs: test
+    if: ${{ !cancelled() }}   # حتی اگر یکی از تست‌های لینوکس خطا بدهد، فایل نصب ساخته می‌شود (self-test ویندوز دروازه‌ی جداگانه است)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - name: "Electron self-test (real Electron - IPC auth, restore, printToPDF, renderer sandbox)"
+        shell: pwsh
+        run: |
+          $env:EDUCENTER_SELFTEST = "$PWD\selftest-report.json"
+          npx electron . 
+          if ($LASTEXITCODE -ne 0) { Get-Content selftest-report.json -ErrorAction SilentlyContinue; throw "Electron self-test failed" }
+          Get-Content selftest-report.json
+      - name: Build installer (never publish)
+        run: npm run dist -- --publish never
+      - name: Verify installer exists and is a real PE executable
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem dist -Filter "EduCenterManager-Setup-*.exe" | Select-Object -First 1
+          if (-not $f) { Get-ChildItem dist -Recurse | Out-String | Write-Host; throw "Installer was not produced" }
+          if ($f.Length -lt 50MB) { throw "Installer suspiciously small: $($f.Length)" }
+          $b = [IO.File]::ReadAllBytes($f.FullName)[0..1]; if ($b[0] -ne 0x4D -or $b[1] -ne 0x5A) { throw "Not a PE file" }
+          Write-Host "OK $($f.Name) $([math]::Round($f.Length/1MB,1)) MB"
+      - name: Silent install / launch / uninstall smoke test
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem dist -Filter "EduCenterManager-Setup-*.exe" | Select-Object -First 1
+          $dir = "$env:RUNNER_TEMP\educenter-install"
+          Start-Process $f.FullName -ArgumentList "/S","/D=$dir" -Wait
+          $exe = Get-ChildItem $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch "Uninstall" } | Select-Object -First 1
+          if (-not $exe) { throw "Installed executable not found in $dir" }
+          $env:EDUCENTER_SELFTEST = "$PWD\installed-selftest.json"; $env:EDUCENTER_USERDATA = "$env:RUNNER_TEMP\educenter-ud"
+          $p = Start-Process $exe.FullName -ArgumentList "--no-sandbox" -PassThru -Wait
+          Get-Content installed-selftest.json -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "Installed app self-test failed (exit $($p.ExitCode))" }
+          $un = Get-ChildItem $dir -Filter "Uninstall*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList "/S" -Wait; Start-Sleep 5
+          if (Test-Path "$dir\$($exe.Name)") { throw "Uninstall did not remove the app" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EduCenterManager-Windows-Installer
+          path: |
+            dist/EduCenterManager-Setup-*.exe
+            selftest-report.json
+            installed-selftest.json
+            selftest.pdf
+          if-no-files-found: error
